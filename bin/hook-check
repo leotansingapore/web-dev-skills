@@ -1,0 +1,213 @@
+#!/usr/bin/env python3
+"""hook-check: Jev rates every hook out of 10 in the reader's shoes.
+
+Usage: hook-check <spec.json> [--h2h]
+
+spec.json:
+  {
+    "reader": "who reads this, in a paragraph, from the product marketing brief",
+    "pains":  ["what keeps them up, in their words", ...],
+    "role":   "where the hook sits, e.g. the H1 of the page selling the CRM module",
+    "category": "what the reader compares it against, e.g. CRM, or SEO and AI search tool",
+    "hooks":  [{"source": "twenty", "text": "A CRM for teams that move fast"},
+               {"source": "ours",   "text": "..."}]
+  }
+
+Six atomic questions per hook in ONE request, answered by Jev (TypeSafe System One)
+with the reader and their pains in state, weighted here in code into a score out of
+10. The two that matter most, "is this an outcome they get" and "would they care",
+carry 55% between them. Competitor hooks and ours are scored on the same questions,
+so a competitor's high scorer shows a MOVE worth borrowing (never the words) and the
+competitor median is the bar ours must clear.
+
+--h2h adds a head-to-head Choice over the hooks, asked in two orders to cancel
+position bias. Only sensible for a shortlist (8 or fewer).
+
+Jev judges; it never writes. Model pinned; no fallback to the LLM on a miss, because a
+score that quietly came from somewhere else is worse than no score.
+"""
+import concurrent.futures as cf
+import json
+import os
+import string
+import sys
+import time
+import urllib.error
+import urllib.request
+
+MODEL = "jev-1.13.0"
+KEY = os.environ.get("TYPESAFE_API_KEY")
+TOKENS = {"in": 0}
+
+DIMENSIONS = {
+    "care": (0.30, {
+        "type": "score",
+        "instructions": "The `reader` has the worries listed in `pains`. They see `hook` once, in the place described by `role`. How much do they care about what it says?",
+        "criteria": [
+            "They would not stop for it; it is about the product, not them",
+            "Mildly interesting, but not a problem they have this month",
+            "It is a problem or a result they have thought about this month",
+            "It is the thing that has been bothering them; they would read the next line",
+        ]}),
+    "outcome": (0.25, {
+        "type": "score",
+        "instructions": "Does `hook` name an outcome the `reader` gets, or does it describe the product?",
+        "criteria": [
+            "Describes the product, a feature or its category, and nothing the reader gets",
+            "Implies an outcome, but leads with the product or a feature",
+            "Names an outcome the reader gets; the product is secondary",
+            "Names the exact result the reader is paying for, in the reader's own words",
+        ]}),
+    "clarity": (0.15, {
+        "type": "score",
+        "instructions": "How well does the `reader` understand `hook` on one read?",
+        "criteria": [
+            "They cannot say what it means",
+            "They get the gist but have to guess at a word or read it twice",
+            "They understand it on one read",
+            "They understand it on one read and could repeat it in their own words",
+        ]}),
+    "credible": (0.15, {
+        "type": "score",
+        "instructions": "The `reader` has sat through many software pitches. How believable is `hook` to them?",
+        "criteria": [
+            "Hype, or promises more than software delivers",
+            "Neither suspicious nor convincing",
+            "Believable: plain, specific, not overpromising",
+        ]}),
+    "distinct": (0.10, {
+        "type": "score",
+        "instructions": "The `reader` is choosing between products of the kind named in `category`. Could any of them have said `hook`, or only a product built for this `reader`?",
+        "criteria": [
+            "Any product of that kind could say it",
+            "Some products of that kind could say it",
+            "Only a product built for this reader and their pains could say it",
+        ]}),
+    "concrete": (0.05, {
+        "type": "score",
+        "instructions": "How concrete is `hook`?",
+        "criteria": [
+            "Only abstract words such as growth, success or efficiency; nothing to picture",
+            "Mostly abstract, with one concrete detail",
+            "Names things the reader can picture: a person, a channel, a day, a number, a document",
+        ]}),
+}
+
+
+def ask(state, questions):
+    body = json.dumps({"model": MODEL, "state": state, "questions": questions}).encode()
+    req = urllib.request.Request(
+        "https://api.typesafe.ai/v1/systemone", data=body,
+        headers={"Authorization": f"Bearer {KEY}", "Content-Type": "application/json"})
+    for attempt in range(4):
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                out = json.load(r)
+                break
+        except urllib.error.HTTPError as e:
+            if e.code in (429, 503, 529) and attempt < 3:
+                time.sleep(2 ** attempt)
+                continue
+            raise SystemExit(f"hook-check: TypeSafe {e.code}: {e.read().decode()[:300]}")
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+            # A dropped connection or a DNS miss (seen on a phone hotspot,
+            # 2026-09-22) is transient; four tries over ~15s, then say so.
+            if attempt < 3:
+                time.sleep(2 ** attempt + 1)
+                continue
+            raise SystemExit(f"hook-check: could not reach TypeSafe after 4 tries: {e}")
+    TOKENS["in"] += out.get("usage", {}).get("input_tokens", 0)
+    return out["answers"]
+
+
+def composite(ans):
+    total, parts = 0.0, {}
+    for key, (w, q) in DIMENSIONS.items():
+        v = ans[key]["score"] / (len(q["criteria"]) - 1)
+        parts[key] = v
+        total += w * v
+    return round(total * 10, 1), parts
+
+
+def head_to_head(state, hooks):
+    probs = [0.0] * len(hooks)
+    for order in (list(range(len(hooks))), list(reversed(range(len(hooks))))):
+        labels = [f"option_{string.ascii_uppercase[i]}" for i in range(len(hooks))]
+        options = {labels[pos]: hooks[idx]["text"] for pos, idx in enumerate(order)}
+        ans = ask({**state, "options": options}, {"pick": {
+            "type": "choice",
+            "instructions": "Which entry in `options` would make the `reader`, with their `pains`, most want to read the next line in the place described by `role`?",
+            "criteria": {lab: f"The hook in `options.{lab}`" for lab in labels},
+        }})["pick"]
+        for pos, idx in enumerate(order):
+            probs[idx] += ans["probabilities"][labels[pos]] / 2
+    return probs
+
+
+def main():
+    if not KEY:
+        raise SystemExit("hook-check: TYPESAFE_API_KEY is not set")
+    if len(sys.argv) < 2:
+        raise SystemExit(__doc__)
+    spec = json.load(open(sys.argv[1]))
+    hooks = spec["hooks"]
+    # `category` is what the reader would compare this product against. It was
+    # hard-coded as "CRM" until 2026-09-22, which is right for /features/crm and
+    # wrong for everything else: the SearchBlueprint homepage run asked whether
+    # "any CRM" could have said its SEO headlines. No default on purpose, so a
+    # spec cannot quietly inherit the wrong market again.
+    if not spec.get("category"):
+        raise SystemExit('hook-check: the spec needs "category", e.g. "CRM" or "SEO and AI search tool"')
+    state = {"reader": spec["reader"], "pains": spec["pains"], "role": spec["role"], "category": spec["category"]}
+    qs = {k: q for k, (_, q) in DIMENSIONS.items()}
+
+    with cf.ThreadPoolExecutor(6) as ex:
+        answers = list(ex.map(lambda h: ask({**state, "hook": h["text"]}, qs), hooks))
+
+    rows = []
+    for h, a in zip(hooks, answers):
+        score, parts = composite(a)
+        rows.append({**h, "score": score, **parts})
+
+    if "--h2h" in sys.argv and len(hooks) <= 8:
+        for r, p in zip(rows, head_to_head(state, hooks)):
+            r["h2h"] = round(p, 2)
+
+    rows.sort(key=lambda r: -r["score"])
+    ours = [r["score"] for r in rows if r["source"] == "ours" or r["source"].startswith("adapted")]
+    theirs = sorted(r["score"] for r in rows if not (r["source"] == "ours" or r["source"].startswith("adapted")))
+    bar = theirs[len(theirs) // 2] if theirs else spec.get("bar")
+
+    # Per-slot winners: highest score with credible >= 0.6. A slot is any
+    # `slot` value on a hook (h1, sub, 01, 02...). Printed first so the
+    # decision is the first thing on screen.
+    slots = {}
+    for r in rows:
+        slots.setdefault(r.get("slot", "-"), []).append(r)
+    if len(slots) > 1 or "-" not in slots:
+        print("winners (highest score, credible >= 0.6):")
+        for slot, rs in slots.items():
+            ok = [r for r in rs if r["credible"] >= 0.6]
+            w = ok[0] if ok else None
+            print(f"  {slot:<4} {w['score'] if w else '-':>4}  {w['text'] if w else 'NONE PASSES credibility'}" + (f"   [{w['source']}]" if w else ""))
+        print()
+
+    print(f"{len(rows)} hooks, reader: {spec['reader'][:70]}...")
+    if bar is not None:
+        best = f", competitor best {theirs[-1]}/10" if theirs else " (from spec)"
+        print(f"competitor median {bar}/10{best}; ours best {max(ours) if ours else '-'}/10")
+    print()
+    print(f"{'/10':>5}  {'care':>4} {'outc':>4} {'clar':>4} {'cred':>4} {'dist':>4}  {'source':<10} hook")
+    for r in rows:
+        flag = " " if bar is None or r["source"] != "ours" else ("+" if r["score"] > bar else "-")
+        h2h = f"  h2h {r['h2h']:.2f}" if "h2h" in r else ""
+        slot = f"{r['slot']:<4} " if "slot" in r else ""
+        print(f"{r['score']:>5} {flag} {r['care']:>4.2f} {r['outcome']:>4.2f} {r['clarity']:>4.2f} {r['credible']:>4.2f} {r['distinct']:>4.2f}  {slot}{r['source']:<18} {r['text']}{h2h}")
+    print(f"\ninput tokens {TOKENS['in']:,}, cost ${TOKENS['in'] * 0.042 / 1e6:.4f}")
+    out = os.path.splitext(sys.argv[1])[0] + ".scored.json"
+    json.dump(rows, open(out, "w"), indent=1)
+    print(f"written {out}")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,50 @@
+{
+ "project": "ExampleProduct",
+ "our_site": "https://example.com",
+ "vault_dir": "~/Documents/<Vault>/Competitive Research",
+ "brief_path": "~/<repo>/.agents/product-marketing.md",
+ "niche": "the specific audience a page must be written for to count as ours, e.g. insurance agents or financial advisers",
+ "our_pages": [
+  "https://example.com/",
+  "https://example.com/features/x"
+ ],
+ "product_evidence": "App routes and live features, one line each, so Jev can tell what the product really has",
+ "readers": {
+  "user": {
+   "reader": "One paragraph: who uses the product day to day, their situation, what they have tried",
+   "pains": [
+    "pain in their words",
+    "..."
+   ],
+   "source": "where this came from"
+  },
+  "buyer": {
+   "reader": "One paragraph: who pays",
+   "pains": [
+    "..."
+   ],
+   "source": "..."
+  }
+ },
+ "category": {
+  "group_a": "what group A's reader compares against",
+  "default": "what our reader compares us against"
+ },
+ "groups": {
+  "group_a": {
+   "label": "Human label for the group",
+   "category": "What these products are",
+   "competitors": {
+    "CompetitorName": "https://competitor.com"
+   }
+  }
+ },
+ "_example_from_activitytracker": {
+  "niche": "insurance agents, insurance agencies or brokers, or financial advisers",
+  "category": {
+   "scheduling": "AI planner, task manager and calendar app",
+   "messaging": "WhatsApp CRM and conversation platform",
+   "default": "sales activity tracking and CRM app for insurance agents"
+  }
+ }
+}

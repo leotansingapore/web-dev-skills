@@ -1,0 +1,63 @@
+{
+ "site": "https://example.com",
+ "title": "Round 1, <site>, <date>",
+ "groups": [
+  {
+   "name": "Site map and site-wide calls",
+   "items": [
+    {
+     "id": "s1",
+     "page": "/for/example",
+     "q": "This page would compete with /for/other for the same reader. Redirect it?",
+     "opts": [
+      "Redirect to /for/other (301)",
+      "Build both"
+     ],
+     "rec": 0,
+     "why": "Two pages for one reader split the same searches."
+    }
+   ]
+  },
+  {
+   "name": "Per-page calls",
+   "items": [
+    {
+     "id": "p1",
+     "page": "/features/example",
+     "q": "H1: the whole-page winner or the stronger single line?",
+     "opts": [
+      "Whole-page winner (page 9.2)",
+      "Stronger line (line 7.9)"
+     ],
+     "rec": 0,
+     "why": "Jev reads pages, not lines."
+    }
+   ]
+  }
+ ],
+ "drafts": [
+  [
+   "example",
+   "/features/example",
+   "example-copy-v1/example-page-copy-v1.md"
+  ]
+ ],
+ "sitemap": [
+  [
+   "Features",
+   "/features",
+   [
+    [
+     "Example",
+     "/features/example",
+     "draft"
+    ],
+    [
+     "Live page",
+     "/features/live",
+     "live"
+    ]
+   ]
+  ]
+ ]
+}

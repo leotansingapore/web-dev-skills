@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Phase 1 decisions</title>
+<style>
+:root{--bg:#0f1115;--card:#171a21;--line:#262b36;--text:#e7e9ee;--muted:#9aa3b2;--accent:#f0643c;--rec:#2f7d5b;--recbg:#12261d;--pick:#23324a;--focus:#6aa6ff}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){--bg:#f7f5f0;--card:#fff;--line:#e3ded3;--text:#1d1b17;--muted:#6b645a;--rec:#2f7d5b;--recbg:#e6f4ec;--pick:#e8eefb;--focus:#2f6fd6}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif}
+main{max-width:860px;margin:0 auto;padding:24px 16px 120px}
+h1{font-size:24px;margin:0 0 4px}
+.sub{color:var(--muted);margin:0 0 24px}
+h2{font-size:15px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:32px 0 12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:12px}
+.q{font-weight:600;margin:0 0 4px}
+.page{display:inline-block;font-size:12px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:1px 8px;margin-bottom:8px}
+.opt{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--line);border-radius:10px;margin-top:8px;cursor:pointer;min-height:44px}
+.opt input{margin-top:3px;width:18px;height:18px;flex:none;accent-color:var(--accent)}
+.opt.sel{background:var(--pick);border-color:var(--focus)}
+.tag{font-size:11px;font-weight:700;color:var(--rec);background:var(--recbg);border-radius:6px;padding:1px 6px;margin-left:6px;white-space:nowrap}
+.why{color:var(--muted);font-size:14px;margin:10px 0 0}
+textarea{width:100%;margin-top:10px;min-height:40px;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--text);font:inherit;font-size:16px;resize:vertical}
+table{width:100%;border-collapse:collapse}
+td{padding:10px 6px;border-top:1px solid var(--line);vertical-align:top}
+td a{color:var(--focus)}
+select{font:inherit;font-size:16px;padding:6px 8px;border-radius:8px;background:var(--card);color:var(--text);border:1px solid var(--line);min-height:40px}
+.bar{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--line);padding:12px 16px}
+.bar div{max-width:860px;margin:0 auto;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+button{font:inherit;font-weight:700;border:0;border-radius:10px;padding:12px 18px;background:var(--accent);color:#fff;cursor:pointer;min-height:44px}
+button.ghost{background:transparent;color:var(--text);border:1px solid var(--line)}
+#status{color:var(--muted);font-size:14px}
+.draftrow td:first-child{width:45%}
+.hub{margin:0 0 14px}.hub:last-child{margin:0}.hub a{color:var(--focus)}.hub b a{color:var(--text)}.hub ul{margin:6px 0 0;padding-left:18px}.hub li{margin:3px 0}.st{font-size:12px;border-radius:6px;padding:1px 6px;margin-left:6px}.st.live{color:var(--rec);background:var(--recbg)}.st.draft{color:var(--focus);background:var(--pick)}.st.other{color:var(--muted);border:1px solid var(--line)}
+@media (max-width:560px){.draftrow td{display:block;width:100%!important;border-top:0;padding:4px 6px}.draftrow{display:block;border-top:1px solid var(--line);padding:6px 0}}
+</style>
+</head>
+<body>
+<main>
+  <h1 id="title">Phase 1 decisions</h1>
+  <p class="sub">Where each page sits, then the calls on each page. My pick is preselected with the reason. Change any, add a note, then Save.</p>
+  <h2>Site map</h2>
+  <div class="card" id="sitemap"></div>
+  <div id="groups"></div>
+  <h2>The copy drafts</h2>
+  <div class="card"><table id="drafts"></table></div>
+</main>
+<div class="bar"><div>
+  <button id="save">Save answers</button>
+  <button class="ghost" id="reset">Reset to my picks</button>
+  <span id="status" role="status" aria-live="polite"></span>
+</div></div>
+<script>
+let KEY = 'site-decisions'
+let data, state = {}
+const load = () => { try { return JSON.parse(localStorage.getItem(KEY) || '{}') } catch { return {} } }
+const keep = () => { try { localStorage.setItem(KEY, JSON.stringify(state)) } catch {} }
+function el(tag, attrs = {}, ...kids) { const e = document.createElement(tag); for (const [k, v] of Object.entries(attrs)) { if (k === 'text') e.textContent = v; else e.setAttribute(k, v) } kids.forEach(k => e.append(k)); return e }
+function render() {
+  document.getElementById('title').textContent = data.title
+  const root = document.getElementById('groups'); root.innerHTML = ''
+  for (const g of data.groups) {
+    root.append(el('h2', { text: g.name }))
+    for (const it of g.items) {
+      const card = el('div', { class: 'card' })
+      if (it.page) card.append(el('span', { class: 'page', text: it.page }))
+      card.append(el('p', { class: 'q', text: it.q }))
+      const cur = state[it.id]?.pick ?? it.rec
+      it.opts.forEach((o, i) => {
+        const lab = el('label', { class: 'opt' + (i === cur ? ' sel' : '') })
+        const r = el('input', { type: 'radio', name: it.id, value: String(i) }); r.checked = i === cur
+        r.addEventListener('change', () => { state[it.id] = { ...(state[it.id] || {}), pick: i }; keep(); render() })
+        const span = el('span', { text: o }); if (i === it.rec) span.append(el('span', { class: 'tag', text: 'My pick' }))
+        lab.append(r, span); card.append(lab)
+      })
+      card.append(el('p', { class: 'why', text: 'Why: ' + it.why }))
+      const ta = el('textarea', { placeholder: 'Note (optional)', 'aria-label': 'Note for ' + it.id }); ta.value = state[it.id]?.note || ''
+      ta.addEventListener('input', () => { state[it.id] = { ...(state[it.id] || {}), note: ta.value }; keep() })
+      card.append(ta); root.append(card)
+    }
+  }
+  const sm = document.getElementById('sitemap'); sm.innerHTML = ''
+  for (const [name, hub, kids] of data.sitemap || []) {
+    const box = el('div', { class: 'hub' })
+    const head = el('b'); head.append(hub ? el('a', { href: (data.site || '') + hub, target: '_blank', rel: 'noopener', text: name + '  ' + hub }) : name)
+    const ul = el('ul')
+    for (const [label, url, status] of kids) {
+      const li = el('li'); const cls = status === 'live' ? 'live' : status === 'draft' ? 'draft' : 'other'
+      li.append(status === 'live' ? el('a', { href: (data.site || '') + url, target: '_blank', rel: 'noopener', text: label }) : label, ' ', el('span', { class: 'st other', text: url }), el('span', { class: 'st ' + cls, text: status }))
+      ul.append(li)
+    }
+    box.append(head, ul); sm.append(box)
+  }
+  const t = document.getElementById('drafts'); t.innerHTML = ''
+  for (const [slug, url, path] of data.drafts) {
+    const k = 'draft:' + slug, cur = state[k] || { go: 'go', note: '' }
+    const sel = el('select', { 'aria-label': 'Decision for ' + url })
+    ;[['go', 'Go as written'], ['edits', 'Go with my edits'], ['hold', 'Hold']].forEach(([v, l]) => { const o = el('option', { value: v, text: l }); if (cur.go === v) o.selected = true; sel.append(o) })
+    sel.addEventListener('change', () => { state[k] = { ...cur, go: sel.value }; keep() })
+    const ta = el('textarea', { placeholder: 'Edits (optional)', 'aria-label': 'Edits for ' + url }); ta.value = cur.note || ''
+    ta.addEventListener('input', () => { state[k] = { ...(state[k] || { go: sel.value }), note: ta.value }; keep() })
+    const a = el('a', { href: '/md/' + path, target: '_blank', rel: 'noopener', text: url })
+    const tr = el('tr', { class: 'draftrow' }, el('td', {}, a), el('td', {}, sel, ta)); t.append(tr)
+  }
+}
+function answers() {
+  const out = { saved_at: new Date().toISOString(), decisions: {}, drafts: {} }
+  for (const g of data.groups) for (const it of g.items) {
+    const s = state[it.id] || {}; const pick = s.pick ?? it.rec
+    out.decisions[it.id] = { page: it.page || null, question: it.q, answer: it.opts[pick], matches_my_pick: pick === it.rec, note: s.note || '' }
+  }
+  for (const [slug, url] of data.drafts) { const s = state['draft:' + slug] || {}; out.drafts[url] = { decision: s.go || 'go', edits: s.note || '' } }
+  return out
+}
+document.getElementById('save').addEventListener('click', async () => {
+  const st = document.getElementById('status'); st.textContent = 'Saving...'
+  try {
+    const r = await fetch('/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(answers(), null, 2) })
+    if (!r.ok) throw new Error(r.status)
+    st.textContent = 'Saved to answers.json next to this page at ' + new Date().toLocaleTimeString() + '. Tell me "saved".'
+  } catch (e) { st.textContent = 'Save failed (' + e.message + '). Your answers are kept in this browser; try again.' }
+})
+document.getElementById('reset').addEventListener('click', () => { if (confirm('Reset every answer to my picks and clear your notes?')) { state = {}; keep(); render(); document.getElementById('status').textContent = 'Reset to my picks.' } })
+fetch('/decisions.json').then(r => r.json()).then(d => { data = d; KEY = 'site-decisions:' + (d.site || '') + ':' + d.title; state = load(); render() })
+</script>
+</body>
+</html>

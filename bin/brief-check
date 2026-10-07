@@ -1,0 +1,104 @@
+#!/usr/bin/env python3
+"""brief-check: does a copy draft obey the product marketing brief?
+
+Usage: brief-check <draft.md> [<brief.md>]
+
+The brief defaults to .agents/product-marketing.md found by walking up from the
+draft, then from the cwd. Reads two lines the brief always has: "Words to use:"
+and "Words to avoid:". Reports every avoid-word that appears in the draft (whole
+word, case-insensitive) and how many of the use-words appear at all, then the
+anti-persona line and the conversion action so you can read the draft against
+them. Exit 1 on any avoid-word hit, 2 when the brief is missing.
+
+Terms in the avoid list longer than three words ("any FYC number presented as
+typical") cannot be grepped and are printed for a hand check instead.
+"""
+import os
+import re
+import sys
+
+
+def find_brief(start):
+    d = os.path.abspath(start if os.path.isdir(start) else os.path.dirname(start))
+    while True:
+        cand = os.path.join(d, '.agents', 'product-marketing.md')
+        if os.path.exists(cand):
+            return cand
+        parent = os.path.dirname(d)
+        if parent == d:
+            return None
+        d = parent
+
+
+def terms(line):
+    """Split 'lead (these are activities), CRM as the headline noun, ...' into
+    greppable heads and a hand-check tail."""
+    body = line.split(':', 1)[1]
+    grep, hand = [], []
+    for raw in body.split(','):
+        t = raw.strip().rstrip('.')
+        if not t:
+            continue
+        head = re.split(r'\s\(| as | when | unless ', t, 1)[0].strip()
+        if 1 <= len(head.split()) <= 3 and not head.lower().startswith(('any', 'anything', 'no ')):
+            grep.append((head, t))
+        else:
+            hand.append(t)
+    return grep, hand
+
+
+def main():
+    if len(sys.argv) < 2:
+        print(__doc__)
+        sys.exit(2)
+    draft_path = sys.argv[1]
+    brief_path = sys.argv[2] if len(sys.argv) > 2 else (find_brief(draft_path) or find_brief(os.getcwd()))
+    if not brief_path or not os.path.exists(brief_path):
+        print('brief-check: no .agents/product-marketing.md above the draft or the cwd.')
+        print('  Build one first: the marketing-skills:product-marketing skill writes it.')
+        sys.exit(2)
+    draft = open(draft_path, encoding='utf-8').read()
+    brief = open(brief_path, encoding='utf-8').read()
+    words = len(draft.split())
+
+    avoid_line = next((l for l in brief.splitlines() if l.lower().startswith('words to avoid:')), '')
+    use_line = next((l for l in brief.splitlines() if l.lower().startswith('words to use:')), '')
+    anti = next((l for l in brief.splitlines() if l.lower().startswith('anti-persona:')), '')
+    conv = next((l for l in brief.splitlines() if l.lower().startswith('conversion action:')), '')
+    voice = next((l for l in brief.splitlines() if l.lower().startswith('tone:')), '')
+
+    print(f'{os.path.basename(draft_path)}  [{words}w]  against {os.path.relpath(brief_path)}')
+    fails = 0
+
+    if avoid_line:
+        grep, hand = terms(avoid_line)
+        for head, full in grep:
+            hits = [m.start() for m in re.finditer(r'\b' + re.escape(head) + r's?\b', draft, re.I)]
+            if hits:
+                fails += len(hits)
+                first = draft[max(0, hits[0] - 40):hits[0] + 40].replace('\n', ' ')
+                print(f'  AVOID  {head!r} x{len(hits)}   ...{first.strip()}...')
+                if full != head:
+                    print(f'         brief: {full}')
+        for t in hand:
+            print(f'  HAND   {t}')
+    else:
+        print('  brief has no "Words to avoid:" line')
+
+    if use_line:
+        grep, _ = terms(use_line)
+        present = [h for h, _ in grep if re.search(r'\b' + re.escape(h) + r's?\b', draft, re.I)]
+        missing = [h for h, _ in grep if h not in present]
+        print(f'  USE    {len(present)} of {len(grep)} brief terms present' + (f'; missing: {", ".join(missing)}' if missing else ''))
+
+    for label, line in (('WHO', anti), ('CTA', conv), ('VOICE', voice)):
+        if line:
+            print(f'  {label:<6} {line.split(":", 1)[1].strip()}')
+
+    print()
+    print('  FAIL: rewrite the flagged lines, or get the brief changed first.' if fails else '  PASS on avoid-words. Read WHO, CTA and VOICE against the draft by hand.')
+    sys.exit(1 if fails else 0)
+
+
+if __name__ == '__main__':
+    main()
